@@ -1,0 +1,7 @@
+__pychache__/
+*.pyc
+.venv/
+venv/
+*.db
+uploads/
+.env

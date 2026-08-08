@@ -1,3 +1,4 @@
+import numpy as np
 import supervision as sv
 
 class LineCounter:
@@ -9,7 +10,7 @@ class LineCounter:
         )
         self.tracker = sv.ByteTrack()
         self.counted_ids = set()
-        self.crossings = []  # list of (track_id, vehicle_class, direction)
+        self.crossings = []
 
     def update(self, boxes, confidences, class_names):
         detections = sv.Detections(
@@ -35,4 +36,4 @@ class LineCounter:
 
     def _class_names_to_ids(self, class_names):
         unique = {name: idx for idx, name in enumerate(set(class_names))}
-        return [unique[name] for name in class_names]
+        return np.array([unique[name] for name in class_names])

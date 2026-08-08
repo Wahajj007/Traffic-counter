@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Traffic Counter Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d0f14;
+    color: #e6e8eb;
+    padding: 32px;
+  }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .subtitle { color: #8a8f9c; margin-bottom: 28px; font-size: 14px; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .card {
+    background: linear-gradient(180deg, #171a22 0%, #12141b 100%);
+    border: 1px solid #232733;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .upload-box {
+    border: 2px dashed #333849;
+    border-radius: 12px;
+    padding: 28px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    font-size: 14px;
+    color: #9aa1ad;
+  }
+  .upload-box:hover { border-color: #4f7fff; background: #151926; }
+
+  .video-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 4px;
+    border-bottom: 1px solid #1e222c;
+    cursor: pointer;
+    font-size: 14px;
+    border-radius: 8px;
+  }
+  .video-item:hover { background: #171b26; }
+  .video-item.active { background: #17203a; }
+
+  .badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    text-transform: capitalize;
+    font-weight: 600;
+  }
+  .badge-queued { background: #333849; color: #b6bcc9; }
+  .badge-processing { background: #3d3315; color: #ffcc4d; }
+  .badge-completed { background: #12321f; color: #4ade80; }
+  .badge-failed { background: #3a1515; color: #ff6b6b; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  .stat {
+    background: #12141b;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    border: 1px solid #1e222c;
+  }
+  .stat .num {
+    font-size: 30px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #4f7fff, #8b5cf6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stat .lbl { font-size: 12px; color: #8a8f9c; margin-top: 4px; }
+
+  .empty { color: #6b7280; font-size: 14px; padding: 20px 0; }
+
+  canvas { max-height: 320px; }
+</style>
+</head>
+<body>
+
+<h1>🚗 Traffic Counter</h1>
+<div class="subtitle">Upload a video to detect, track, and count vehicles automatically</div>
+
+<div class="layout">
+  <div>
+    <div class="card">
+      <div class="upload-box" id="uploadBox">
+        Click or drag a video here
+        <input type="file" id="fileInput" accept=".mp4,.mov,.avi,.mkv" style="display:none">
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="videoList"><div class="empty">No videos yet</div></div>
+    </div>
+  </div>
+
+  <div id="dashboard">
+    <div class="card"><div class="empty">Select a video to see its results</div></div>
+  </div>
+</div>
+
+<script>
+let selectedId = null;
+
+const uploadBox = document.getElementById('uploadBox');
+const fileInput = document.getElementById('fileInput');
+
+uploadBox.onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  uploadBox.textContent = 'Uploading...';
+  await fetch('/upload', { method: 'POST', body: form });
+  uploadBox.textContent = 'Click or drag a video here';
+  fileInput.value = '';
+  refreshVideoList();
+};
+
+async function refreshVideoList() {
+  const res = await fetch('/videos');
+  const videos = await res.json();
+
+  const listEl = document.getElementById('videoList');
+  if (videos.length === 0) {
+    listEl.innerHTML = '<div class="empty">No videos yet</div>';
+    return;
+  }
+
+  listEl.innerHTML = videos.map(v => `
+    <div class="video-item ${v.id === selectedId ? 'active' : ''}" onclick="selectVideo('${v.id}')">
+      <span>${v.filename}</span>
+      <span class="badge badge-${v.status}">${v.status}</span>
+    </div>
+  `).join('');
+
+  if (!selectedId && videos.length > 0) {
+    selectVideo(videos[0].id);
+  }
+
+  const current = videos.find(v => v.id === selectedId);
+  if (current) renderDashboard(current);
+}
+
+async function selectVideo(id) {
+  selectedId = id;
+  refreshVideoList();
+}
+
+let chartInstance = null;
+
+async function renderDashboard(video) {
+  const dashEl = document.getElementById('dashboard');
+
+  if (video.status !== 'completed') {
+    dashEl.innerHTML = `
+      <div class="card">
+        <h3>${video.filename}</h3>
+        <p style="margin-top:10px;">Status: <span class="badge badge-${video.status}">${video.status}</span></p>
+        <p style="color:#8a8f9c; margin-top:10px; font-size:13px;">
+          ${video.status === 'failed' ? 'Processing failed — check the server terminal for the error.' : 'Processing runs in the background — this updates automatically.'}
+        </p>
+      </div>`;
+    return;
+  }
+
+  const res = await fetch(`/videos/${video.id}/summary`);
+  const summary = await res.json();
+
+  const classEntries = Object.entries(summary.by_class);
+
+  dashEl.innerHTML = `
+    <div class="card">
+      <h3>${video.filename}</h3>
+      <div class="stat-grid" style="margin-top:14px;">
+        <div class="stat"><div class="num">${summary.total_count}</div><div class="lbl">Total vehicles</div></div>
+        ${classEntries.map(([cls, count]) => `
+          <div class="stat"><div class="num">${count}</div><div class="lbl">${cls}</div></div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:14px;">Breakdown by vehicle type</h3>
+      <canvas id="classChart"></canvas>
+    </div>
+  `;
+
+  const ctx = document.getElementById('classChart');
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: classEntries.map(([cls]) => cls),
+      datasets: [{
+        data: classEntries.map(([, count]) => count),
+        backgroundColor: ['#4f7fff', '#8b5cf6', '#4ade80', '#ffcc4d', '#ff6b6b'],
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: '#e6e8eb' } } }
+    }
+  });
+}
+
+refreshVideoList();
+setInterval(refreshVideoList, 4000);
+</script>
+
+</body>
+</html>
